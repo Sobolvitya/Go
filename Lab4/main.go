@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"time"
-//	"math/rand"
 	"strconv"
 	"math/rand"
 )
@@ -14,23 +13,29 @@ const CONCLUSION_TIME = 5000
 
 
 var totalWorkerCount int = 2
-var totalClientCount int = 10
+var totalClientCount int = 5
 var totalCountOfRejections = 0
 var activeWorkerCount = 0
+var responseCount = 0
 
 var totalTaskGeneratedInLast5Seconds = 0
 var totalTaskSolvedInLast5Seconds = 0
 var totalTaskRejectedInLast5Seconds = 0
 
 
-var write = make(chan string)
-var read = make(chan string)
+var write = make(chan Chunk, 20)
 var stopClient = make(chan bool)
 var stopWorker = make(chan bool)
 var fail = make(chan bool, 20)
 var activateWorker = make(chan bool, 20)
+var increaseRequestCount = make(chan bool)
 var taskGenerated = make(chan bool, 20)
 var taskSolved = make(chan bool, 20)
+
+type Chunk struct {
+	channel chan string
+	fileName string
+}
 
 
 func worker(number string) {
@@ -38,12 +43,12 @@ func worker(number string) {
 	for {
 		select {
 		
-		case msg := <- write:
+		case data := <- write:
+			msg := data.fileName
 			msg = msg + " : w" + number
 			time.Sleep((time.Millisecond * time.Duration(r.Int31n(110))))
-			read <- msg
+			data.channel <- msg
 			activateWorker <- true
-			
 		case <- stopWorker:
 			return
 		}
@@ -51,22 +56,26 @@ func worker(number string) {
 }
 
 func client(number string) {
+
 	tick := time.NewTicker(time.Duration(FREQUENCY) * time.Millisecond)
+	var clientSendBackChanek = make(chan string)
+
 	for t := range tick.C {
-		write <- string(t.String() + " : c" + number)
+
+		dataToSend := Chunk{clientSendBackChanek, string(t.String() + " : c" + number)}
+		write <- dataToSend
 		taskGenerated <-  true
-		ticker := time.NewTimer(WAIT_TIME * time.Millisecond).C
+		ticker := time.NewTimer(WAIT_TIME * time.Millisecond)
 		select {
-			case res := <- read:
+			case res := <- clientSendBackChanek:
 				res = res + ": c" + number
-				fmt.Println(res)
-				//taskSolved <- true
-			case <-ticker:
-				<- read
+				increaseRequestCount <- true
+				taskSolved <- true
+			case <-ticker.C:
+				<-clientSendBackChanek // possible bug, because we can wait for response forever
 				fail <- true
-				fmt.Println("We fucked it up, no fucking responce =( ")
 			case <-stopClient:
-				<-read
+				<-clientSendBackChanek
 				return
 		}
 	}
@@ -92,34 +101,45 @@ func setUp() {
 	controller()
 }
 
+
 func controller() {
-	tickerToCheckState := time.NewTimer(CHECK_TIME * time.Millisecond).C
-	tickerToPrint := time.NewTimer(CONCLUSION_TIME * time.Millisecond).C
-	
-	select {
+	tickerToCheckState := time.NewTicker(CHECK_TIME * time.Millisecond).C
+	tickerToPrint := time.NewTicker(CONCLUSION_TIME * time.Millisecond).C
+	for {
+		select {
 		case <- tickerToPrint:
 			printData()
 			clearConclusionData()
 		case <- tickerToCheckState:
-			
-			if float64(totalCountOfRejections) > float64(totalClientCount) * 0.2 {
+
+			if float64(totalCountOfRejections) > float64(responseCount) * 0.2 {
+				fmt.Println("Add Worker")
 				go worker("2")
 				totalWorkerCount += 1
-				totalCountOfRejections = 0
 			}
-			
+
 			if float64(activeWorkerCount) < 0.5 * float64(totalWorkerCount) && totalWorkerCount > 0 {
+				fmt.Println("Delete Worker")
 				stopWorker <- true
 				totalWorkerCount -= 1
 			}
+
+			totalCountOfRejections = 0
+			responseCount = 0
+			activeWorkerCount = 0
+
 		case <- fail:
 			increaseRejectionCounter()
 		case <- taskGenerated:
 			totalTaskGeneratedInLast5Seconds += 1
 		case <- taskSolved:
 			totalTaskSolvedInLast5Seconds += 1
+		case <- increaseRequestCount:
+			responseCount += 1
+		case <- activateWorker:
+			activeWorkerCount += 1
+		}
 	}
-	
 }
 
 func increaseRejectionCounter() {
@@ -134,18 +154,19 @@ func clearConclusionData() {
 }
 
 func printData() {
+	fmt.Println("\n===================================================")
 	fmt.Println("Total worker count: ", totalWorkerCount)
 	fmt.Println("Total client count: ", totalClientCount)
 	fmt.Println("Client activity in milis: ", FREQUENCY)
 	fmt.Println("Amount of tasks generated in last 5s : ", totalTaskGeneratedInLast5Seconds)
 	fmt.Println("Amount of tasks solved in last 5s : ", totalTaskSolvedInLast5Seconds)
 	fmt.Println("Amount of tasks rejected in last 5s : ", totalTaskRejectedInLast5Seconds)
-	
+	fmt.Println("Amout of active worker in last second:", activeWorkerCount)
+	fmt.Println("===================================================\n")
 }
 
 func main() {
 	fmt.Println("............Start........................")
 	setUp()
-	
 	time.Sleep(1550 * time.Second)
 }
