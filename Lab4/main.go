@@ -5,10 +5,7 @@ import (
 	"time"
 	"strconv"
 	"math/rand"
-	// "os/signal"
 	"os"
-	//"os/signal"
-	//d"syscall"
 	"os/exec"
 )
 
@@ -53,10 +50,10 @@ func worker(number string) {
 		
 		case data := <- write:
 			msg := data.fileName
-			msg = msg + " : w" + number
-			time.Sleep((time.Millisecond * time.Duration(r.Int31n(110))))
+			time.Sleep((time.Millisecond * time.Duration(r.Int31n(110)))) // типо файл считывает
 			data.channel <- msg
 			activateWorker <- true
+			time.Sleep(time.Millisecond * 20)
 		case <- stopWorker:
 			return
 		}
@@ -70,51 +67,27 @@ func client(number string) {
 
 	for t := range tick.C {
 
-		dataToSend := Chunk{clientSendBackChanek, string(t.String() + " : c" + number)}
+		dataToSend := Chunk{clientSendBackChanek, string("FileName") + t.String()}
 		write <- dataToSend
 		taskGenerated <-  true
 		ticker := time.NewTimer(WAIT_TIME * time.Millisecond)
 		select {
-			case res := <- clientSendBackChanek:
-				res = res + ": c" + number
+			case <- clientSendBackChanek:
 				increaseRequestCount <- true
 				taskSolved <- true
 			case <-ticker.C:
-				<-clientSendBackChanek // possible bug, because we can wait for response forever
+				<-clientSendBackChanek
 				fail <- true
 			case <-stopClient:
-
 				<-clientSendBackChanek
 				return
 		}
 	}
 }
 
-func setUp() {
-	fmt.Println("............Initializing.................")
-	go readKeyBoardEvents()
-	
-	fmt.Println("............Set up Workers................")
-	
-	for i := 0; i < totalWorkerCount; i++ {
-		go worker(strconv.FormatInt(int64(i), 10))
-	}
-	
-	fmt.Println("............Set Up Client...................")
-	
-	
-	for i := 0; i < totalClientCount; i++ {
-		go client(strconv.FormatInt(int64(i), 10))
-	}
-	
-	fmt.Println("............Run controller...................")
-	controller()
-}
-
-
 func controller() {
-	tickerToCheckState := time.NewTicker(CHECK_TIME * time.Millisecond).C
 	tickerToPrint := time.NewTicker(CONCLUSION_TIME * time.Millisecond).C
+	tickerToCheckState := time.NewTicker(CHECK_TIME * time.Millisecond).C
 	for {
 		select {
 		case <- tickerToPrint:
@@ -173,6 +146,28 @@ func controller() {
 			}
 		}
 	}
+}
+
+
+func setUp() {
+	fmt.Println("............Initializing.................")
+	go readKeyBoardEvents()
+
+	fmt.Println("............Set up Workers................")
+
+	for i := 0; i < totalWorkerCount; i++ {
+		go worker(strconv.FormatInt(int64(i), 10))
+	}
+
+	fmt.Println("............Set Up Client...................")
+
+
+	for i := 0; i < totalClientCount; i++ {
+		go client(strconv.FormatInt(int64(i), 10))
+	}
+
+	fmt.Println("............Run controller...................")
+	controller()
 }
 
 func increaseRejectionCounter() {
