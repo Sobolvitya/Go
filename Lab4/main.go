@@ -5,8 +5,14 @@ import (
 	"time"
 	"strconv"
 	"math/rand"
+	// "os/signal"
+	"os"
+	//"os/signal"
+	//d"syscall"
+	"os/exec"
 )
-const FREQUENCY int = 500
+
+var FREQUENCY int = 500
 const WAIT_TIME = 100
 const CHECK_TIME = 1000
 const CONCLUSION_TIME = 5000
@@ -31,6 +37,8 @@ var activateWorker = make(chan bool, 20)
 var increaseRequestCount = make(chan bool)
 var taskGenerated = make(chan bool, 20)
 var taskSolved = make(chan bool, 20)
+var userCommand = make(chan string, 1)
+var addClient = make(chan bool, 1)
 
 type Chunk struct {
 	channel chan string
@@ -75,6 +83,7 @@ func client(number string) {
 				<-clientSendBackChanek // possible bug, because we can wait for response forever
 				fail <- true
 			case <-stopClient:
+
 				<-clientSendBackChanek
 				return
 		}
@@ -83,6 +92,7 @@ func client(number string) {
 
 func setUp() {
 	fmt.Println("............Initializing.................")
+	go readKeyBoardEvents()
 	
 	fmt.Println("............Set up Workers................")
 	
@@ -138,6 +148,29 @@ func controller() {
 			responseCount += 1
 		case <- activateWorker:
 			activeWorkerCount += 1
+		case <- addClient:
+			go client("2")
+
+		case res :=<- userCommand:
+			switch res {
+			case "+":
+				addClient <- true
+				totalClientCount += 1
+				fmt.Println("Add new client")
+				fmt.Println("Current number of active client: ", totalClientCount)
+			case "-":
+				stopClient <- true
+				totalClientCount -= 1
+				fmt.Println("Stopped client")
+				fmt.Println("Current number of active client: ", totalClientCount)
+
+			case "<":
+				FREQUENCY = int(float32(FREQUENCY) * 0.9);
+				fmt.Println("Current Frequency is ", FREQUENCY)
+			case ">":
+				FREQUENCY = int(float32(FREQUENCY) * 1.1);
+				fmt.Println("Current Frequency is ", FREQUENCY)
+			}
 		}
 	}
 }
@@ -165,8 +198,24 @@ func printData() {
 	fmt.Println("===================================================\n")
 }
 
+
+func readKeyBoardEvents() {
+	exec.Command("stty", "-F", "/dev/tty", "cbreak", "min", "1").Run()
+	// do not display entered characters on the screen
+	exec.Command("stty", "-F", "/dev/tty", "-echo").Run()
+	// restore the echoing state when exiting
+	defer exec.Command("stty", "-F", "/dev/tty", "echo").Run()
+	var b []byte = make([]byte, 1)
+	for {
+		os.Stdin.Read(b)
+		userCommand <- string(b)
+	}
+}
+
 func main() {
-	fmt.Println("............Start........................")
+	go readKeyBoardEvents()
 	setUp()
 	time.Sleep(1550 * time.Second)
 }
+
+
